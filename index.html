@@ -175,7 +175,9 @@
   .link-add .la-label{flex:1 1 90px;}
   .link-add .btn{flex:none;}
   .note{font-size:12.5px;color:var(--ink-faint);line-height:1.65;margin:14px 0 2px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;}
-  .del-row{display:flex;justify-content:flex-end;margin-top:16px;}
+  .del-row{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
+  .btn-edit{background:transparent;border:1px solid var(--line-strong);color:var(--ink-soft);font-size:13px;padding:9px 14px;}
+  .btn-edit:hover{color:var(--ink);border-color:var(--ink-faint);}
   .btn-del{background:transparent;border:1px solid var(--line-strong);color:var(--ink-faint);font-size:13px;padding:9px 14px;}
   .btn-del:hover{color:var(--danger);border-color:var(--danger);}
   .btn-del.armed{background:var(--danger-wash);border-color:var(--danger);color:var(--danger);}
@@ -281,7 +283,7 @@
     <div class="modal">
       <div class="modal-head">
         <div>
-          <div class="ey">新しく登録</div>
+          <div class="ey" id="fEyebrow">新しく登録</div>
           <h2 id="fTitle">ツールを道具箱に入れる</h2>
         </div>
         <button class="xclose" id="closeForm" aria-label="閉じる">✕</button>
@@ -544,13 +546,15 @@
         '</div>'+
         '<div class="contact">'+slackBtn+mailBtn+'</div>'+
         '<p class="note">気になったら 15分ほどもらって、直接聞いてみてください。資料を渡すかどうかは、作った本人の判断でOK。</p>'+
-        (canDelete(t)?'<div class="del-row"><button class="btn btn-del" data-del="'+esc(t.id)+'" data-armed="0">このツールを削除</button></div>':'')+
+        '<div class="del-row"><button class="btn btn-edit" data-edit="'+esc(t.id)+'">編集</button>'+(canDelete(t)?'<button class="btn btn-del" data-del="'+esc(t.id)+'" data-armed="0">削除</button>':'')+'</div>'+
       '</div>';
     openOverlay(detailOverlay);
   }
   window.__closeDetail=function(){ closeOverlay(detailOverlay); };
 
   detailModal.addEventListener("click",function(e){
+    var editBtn=e.target.closest("[data-edit]");
+    if(editBtn){ var eid=editBtn.getAttribute("data-edit"); closeOverlay(detailOverlay); openEdit(eid); return; }
     var copyBtn=e.target.closest("[data-copy]");
     if(copyBtn){
       var val=copyBtn.getAttribute("data-copy");
@@ -599,10 +603,21 @@
       tools=tools.filter(function(x){return String(x.id)!==String(id);}); applyData(tools); toast("削除しました");
     }
   }
+  function updateTool(id,data){
+    var fields={ name:data.name, one:data.one, tags:data.tags||[], team:data.team, person:data.person,
+      slack:data.slack, email:data.email, links:data.links||[], howto:data.howto||"" };
+    if(dbMode){
+      SB.from("tools").update(fields).eq("id",id)
+        .then(function(res){ if(res.error){ writeErr(res.error,"保存"); } else { toast("保存しました"); load(); } })
+        .catch(function(e){ writeErr(e,"保存"); });
+    } else {
+      tools=tools.map(function(x){ if(String(x.id)===String(id)){ for(var k in fields){ x[k]=fields[k]; } } return x; }); applyData(tools); toast("保存しました");
+    }
+  }
 
   // ---- form ----
   var formOverlay=document.getElementById("formOverlay");
-  var selectedTags=[], customTags=[], links=[];
+  var selectedTags=[], customTags=[], links=[], editingId=null;
 
   function renderTagPick(){
     var pool=BASE_TAGS.slice(); customTags.forEach(function(t){ if(pool.indexOf(t)===-1) pool.push(t); });
@@ -649,15 +664,45 @@
 
   function openForm(){
     if(!canWrite){ toast("このアカウントでは登録できません（閲覧のみ）"); return; }
+    editingId=null;
     ["f-name","f-one","f-person","f-slack","f-email","f-long","f-tag-new","f-link-url","f-link-label"].forEach(function(id){ document.getElementById(id).value=""; });
     ["f-name-w","f-one-w","f-person-w"].forEach(function(id){ document.getElementById(id).classList.remove("err"); });
     document.getElementById("f-team").selectedIndex=0;
     selectedTags=[]; customTags=[]; renderTagPick();
     links=[]; renderLinkList();
+    document.getElementById("fEyebrow").textContent="新しく登録";
+    document.getElementById("fTitle").textContent="ツールを道具箱に入れる";
+    document.getElementById("submitForm").textContent="道具箱に入れる";
     openOverlay(formOverlay);
     setTimeout(function(){ document.getElementById("f-name").focus(); },60);
   }
   window.__openForm=openForm;
+
+  function openEdit(id){
+    var t=tools.find(function(x){return String(x.id)===String(id);}); if(!t) return;
+    editingId=id;
+    document.getElementById("f-name").value=t.name||"";
+    document.getElementById("f-one").value=t.one||"";
+    document.getElementById("f-person").value=t.person||"";
+    document.getElementById("f-slack").value=t.slack||"";
+    document.getElementById("f-email").value=t.email||"";
+    document.getElementById("f-long").value=t.howto||"";
+    ["f-name-w","f-one-w","f-person-w"].forEach(function(x){ document.getElementById(x).classList.remove("err"); });
+    document.getElementById("f-tag-new").value=""; document.getElementById("f-link-url").value=""; document.getElementById("f-link-label").value="";
+    var ts=document.getElementById("f-team"), found=false;
+    for(var i=0;i<ts.options.length;i++){ if(ts.options[i].value===t.team){ ts.selectedIndex=i; found=true; break; } }
+    if(!found && t.team){ var o=document.createElement("option"); o.value=t.team; o.textContent=t.team; ts.appendChild(o); ts.value=t.team; }
+    selectedTags=(t.tags||[]).slice();
+    customTags=selectedTags.filter(function(tg){ return BASE_TAGS.indexOf(tg)===-1; });
+    renderTagPick();
+    links=(t.links||[]).map(function(l){ return {url:l.url, label:l.label||""}; });
+    renderLinkList();
+    document.getElementById("fEyebrow").textContent="編集";
+    document.getElementById("fTitle").textContent="ツールを編集";
+    document.getElementById("submitForm").textContent="保存する";
+    openOverlay(formOverlay);
+    setTimeout(function(){ document.getElementById("f-name").focus(); },60);
+  }
 
   function submitForm(){
     var name=document.getElementById("f-name").value.trim();
@@ -667,10 +712,12 @@
     mark("f-name-w",!name); mark("f-one-w",!one); mark("f-person-w",!person);
     if(!ok){ toast("* の項目を入れてください"); return; }
     var tags=selectedTags.slice().sort(function(a,b){ var ia=BASE_TAGS.indexOf(a),ib=BASE_TAGS.indexOf(b); if(ia===-1)ia=99; if(ib===-1)ib=99; return ia-ib; });
-    closeOverlay(formOverlay);
-    addTool({ name:name, tags:tags, team:document.getElementById("f-team").value, person:person,
+    var payload={ name:name, tags:tags, team:document.getElementById("f-team").value, person:person,
       slack:document.getElementById("f-slack").value.trim(), email:document.getElementById("f-email").value.trim(),
-      links:links.slice(), one:one, problem:"", forwho:"", howto:document.getElementById("f-long").value.trim(), keywords:"" });
+      links:links.slice(), one:one, howto:document.getElementById("f-long").value.trim() };
+    closeOverlay(formOverlay);
+    if(editingId){ updateTool(editingId, payload); }
+    else { payload.problem=""; payload.forwho=""; payload.keywords=""; addTool(payload); }
   }
 
   // ---- overlay utils ----
